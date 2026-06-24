@@ -147,8 +147,9 @@ async function routeParsed(bot, chatId, parsed, { rawMessage, fromAudio }) {
     return;
   }
 
+  const isReadOnly = parsed.action === 'ver' || parsed.action === 'consultar';
   const isBulkCancel = parsed.action === 'cancelar' && !parsed.patientName;
-  const requiresConfirmation = fromAudio || isBulkCancel;
+  const requiresConfirmation = !isReadOnly && (fromAudio || isBulkCancel);
 
   if (requiresConfirmation) {
     pendingByChat.set(chatId, { type: 'awaitingConfirmation', parsed });
@@ -178,6 +179,8 @@ function describeAction(parsed) {
       return `Entendi que você quer remarcar ${parsed.patientName} para ${formatDatePtBr(parsed.newDate)} às ${parsed.newTime}.`;
     case 'ver':
       return `Entendi que você quer ver a agenda de ${parsed.period === 'week' ? 'semana' : formatDatePtBr(parsed.date)}.`;
+    case 'consultar':
+      return `Entendi que você quer saber quando ${parsed.patientName} está marcado(a).`;
     default:
       return 'Entendi seu pedido.';
   }
@@ -199,6 +202,8 @@ async function executeAction(bot, chatId, parsed) {
       return handleRemarcar(bot, chatId, parsed);
     case 'ver':
       return handleVer(bot, chatId, parsed);
+    case 'consultar':
+      return handleConsultar(bot, chatId, parsed);
     default:
       await bot.sendMessage(chatId, 'Não consegui executar essa ação.');
   }
@@ -310,6 +315,28 @@ async function runOnEvent(bot, chatId, action, event, parsed) {
     await calendar.rescheduleEvent(event.id, newDate, newTime);
     await bot.sendMessage(chatId, `🔁 Consulta remarcada para ${formatDatePtBr(newDate)} às ${newTime}.`);
   }
+}
+
+async function handleConsultar(bot, chatId, parsed) {
+  const { patientName } = parsed;
+  const events = await calendar.findUpcomingEventsByPatient(patientName);
+
+  if (events.length === 0) {
+    await bot.sendMessage(chatId, `Não encontrei nenhuma consulta marcada para ${patientName} nos próximos dias.`);
+    return;
+  }
+
+  const lines = events.map((ev) => {
+    const time = calendar.formatTimeFromISO(ev.start.dateTime);
+    const dateStr = calendar.formatDateFromISO(ev.start.dateTime);
+    return `🕐 ${dateStr} às ${time}`;
+  });
+
+  const intro = events.length === 1
+    ? `📅 ${patientName} está marcado(a) para:`
+    : `📅 ${patientName} tem ${events.length} consultas marcadas:`;
+
+  await bot.sendMessage(chatId, `${intro}\n\n${lines.join('\n')}`);
 }
 
 function formatEventOptions(events) {
