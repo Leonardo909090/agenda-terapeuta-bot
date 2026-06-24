@@ -107,19 +107,23 @@ async function suggestFreeSlots(date, fromTime = '08:00', count = 3, durationMin
   return slots;
 }
 
-async function createEvent({ patientName, date, time, duration = DEFAULT_DURATION_MIN, notes }) {
+async function createEvent({ patientName, date, time, duration = DEFAULT_DURATION_MIN, notes, recurrence }) {
   const calendar = getCalendar();
   const { date: endDate, time: endTime } = addMinutes(date, time, duration);
 
-  const { data } = await calendar.events.insert({
-    calendarId: calendarId(),
-    requestBody: {
-      summary: `Consulta: ${patientName}`,
-      description: notes || '',
-      start: { dateTime: toRFC3339(date, time), timeZone: TIMEZONE },
-      end: { dateTime: toRFC3339(endDate, endTime), timeZone: TIMEZONE },
-    },
-  });
+  const requestBody = {
+    summary: `Consulta: ${patientName}`,
+    description: notes || '',
+    start: { dateTime: toRFC3339(date, time), timeZone: TIMEZONE },
+    end: { dateTime: toRFC3339(endDate, endTime), timeZone: TIMEZONE },
+  };
+
+  if (recurrence?.weekday) {
+    const countPart = recurrence.count ? `;COUNT=${recurrence.count}` : '';
+    requestBody.recurrence = [`RRULE:FREQ=WEEKLY;BYDAY=${recurrence.weekday}${countPart}`];
+  }
+
+  const { data } = await calendar.events.insert({ calendarId: calendarId(), requestBody });
 
   return data;
 }

@@ -11,6 +11,17 @@ const MISSING_INFO_LABELS = {
   time: 'o horário',
   newDate: 'a nova data',
   newTime: 'o novo horário',
+  recurrenceCount: 'por quantas semanas devo repetir',
+};
+
+const WEEKDAY_LABELS = {
+  MO: 'segunda-feira',
+  TU: 'terça-feira',
+  WE: 'quarta-feira',
+  TH: 'quinta-feira',
+  FR: 'sexta-feira',
+  SA: 'sábado',
+  SU: 'domingo',
 };
 
 function createBot() {
@@ -149,7 +160,8 @@ async function routeParsed(bot, chatId, parsed, { rawMessage, fromAudio }) {
 
   const isReadOnly = parsed.action === 'ver' || parsed.action === 'consultar';
   const isBulkCancel = parsed.action === 'cancelar' && !parsed.patientName;
-  const requiresConfirmation = !isReadOnly && (fromAudio || isBulkCancel);
+  const isRecurring = parsed.action === 'criar' && !!parsed.recurrence?.weekday;
+  const requiresConfirmation = !isReadOnly && (fromAudio || isBulkCancel || isRecurring);
 
   if (requiresConfirmation) {
     pendingByChat.set(chatId, { type: 'awaitingConfirmation', parsed });
@@ -170,6 +182,11 @@ async function routeParsed(bot, chatId, parsed, { rawMessage, fromAudio }) {
 function describeAction(parsed) {
   switch (parsed.action) {
     case 'criar':
+      if (parsed.recurrence?.weekday) {
+        const weekdayLabel = WEEKDAY_LABELS[parsed.recurrence.weekday] || parsed.recurrence.weekday;
+        const countLabel = parsed.recurrence.count ? `por ${parsed.recurrence.count} semanas` : 'sem data de término definida';
+        return `Entendi que você quer marcar ${parsed.patientName} toda ${weekdayLabel} às ${parsed.time}, a partir de ${formatDatePtBr(parsed.date)}, ${countLabel}.`;
+      }
       return `Entendi que você quer marcar ${parsed.patientName} no dia ${formatDatePtBr(parsed.date)} às ${parsed.time}.`;
     case 'cancelar':
       return parsed.patientName
@@ -210,7 +227,7 @@ async function executeAction(bot, chatId, parsed) {
 }
 
 async function handleCriar(bot, chatId, parsed) {
-  const { patientName, date, time, notes } = parsed;
+  const { patientName, date, time, notes, recurrence } = parsed;
   const { available, conflictingEvent } = await calendar.checkAvailability(date, time);
 
   if (!available) {
@@ -226,7 +243,18 @@ async function handleCriar(bot, chatId, parsed) {
     return;
   }
 
-  await calendar.createEvent({ patientName, date, time, notes });
+  await calendar.createEvent({ patientName, date, time, notes, recurrence });
+
+  if (recurrence?.weekday) {
+    const weekdayLabel = WEEKDAY_LABELS[recurrence.weekday] || recurrence.weekday;
+    const countLabel = recurrence.count ? `por ${recurrence.count} semanas` : 'sem data de término (repete indefinidamente até você cancelar)';
+    await bot.sendMessage(
+      chatId,
+      `✅ Consulta recorrente marcada!\n👤 Paciente: ${patientName}\n🔁 Toda ${weekdayLabel} às ${time} (2h)\n📅 A partir de: ${formatDatePtBr(date)}\n${countLabel}\n\n⚠️ Só verifiquei conflito no primeiro horário — vale conferir a agenda das próximas semanas.`
+    );
+    return;
+  }
+
   await bot.sendMessage(
     chatId,
     `✅ Consulta marcada!\n👤 Paciente: ${patientName}\n📅 Data: ${formatDatePtBr(date)}\n🕐 Horário: ${time} (2h)`
