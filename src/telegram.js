@@ -197,8 +197,11 @@ function describeAction(parsed) {
       }
       return `Entendi que você quer marcar ${parsed.patientName} no dia ${formatDatePtBr(parsed.date)} às ${parsed.time}.`;
     case 'cancelar':
-      return parsed.patientName
-        ? `Entendi que você quer cancelar a consulta de ${parsed.patientName}${parsed.date ? ` do dia ${formatDatePtBr(parsed.date)}` : ''}.`
+      if (parsed.patientName) {
+        return `Entendi que você quer cancelar a consulta de ${parsed.patientName}${parsed.date ? ` do dia ${formatDatePtBr(parsed.date)}` : ''}.`;
+      }
+      return parsed.period === 'week'
+        ? 'Entendi que você quer cancelar TODA a agenda dessa semana.'
         : `Entendi que você quer cancelar TODA a agenda do dia ${formatDatePtBr(parsed.date)}.`;
     case 'remarcar':
       return `Entendi que você quer remarcar ${parsed.patientName} para ${formatDatePtBr(parsed.newDate)} às ${parsed.newTime}.`;
@@ -270,11 +273,28 @@ async function handleCriar(bot, chatId, parsed) {
 }
 
 async function handleCancelar(bot, chatId, parsed) {
-  const { patientName, date } = parsed;
+  const { patientName, date, period } = parsed;
 
   if (!patientName) {
+    if (period === 'week') {
+      const today = calendar.todayISO();
+      const events = await calendar.listEventsForRange(today, calendar.addDaysISO(today, 6));
+
+      if (events.length === 0) {
+        await bot.sendMessage(chatId, 'Você não tem nenhuma consulta marcada essa semana.');
+        return;
+      }
+
+      for (const ev of events) {
+        await calendar.cancelEvent(ev.id);
+      }
+
+      await bot.sendMessage(chatId, `🗑️ Cancelei todas as ${events.length} consulta(s) dessa semana.`);
+      return;
+    }
+
     if (!date) {
-      await bot.sendMessage(chatId, 'Para cancelar toda a agenda eu preciso saber a data. Pode me dizer qual dia?');
+      await bot.sendMessage(chatId, 'Para cancelar toda a agenda eu preciso saber a data, ou se é a semana toda. Pode me dizer?');
       return;
     }
 
