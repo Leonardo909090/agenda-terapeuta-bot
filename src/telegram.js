@@ -108,6 +108,14 @@ async function handleIncomingText(bot, chatId, text, { fromAudio }) {
 }
 
 async function handleMissingInfoReply(bot, chatId, text, pending) {
+  const standalone = await interpretCommand(text);
+  const isStandaloneComplete = standalone.action !== 'desconhecido' && (!standalone.missingInfo || standalone.missingInfo.length === 0);
+
+  if (isStandaloneComplete) {
+    await routeParsed(bot, chatId, standalone, { rawMessage: text, fromAudio: pending.fromAudio });
+    return;
+  }
+
   const combined = `${pending.rawMessage}. ${text}`;
   const parsed = await interpretCommand(combined);
   await routeParsed(bot, chatId, parsed, { rawMessage: combined, fromAudio: pending.fromAudio });
