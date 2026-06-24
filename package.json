@@ -1,0 +1,20 @@
+{
+  "name": "therapist-calendar-bot",
+  "version": "1.0.0",
+  "description": "Bot de Telegram para gerenciar a agenda de uma terapeuta, integrado ao Google Calendar, com transcrição e interpretação via Groq.",
+  "private": true,
+  "type": "commonjs",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "auth:google": "node scripts/auth-google.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7",
+    "googleapis": "^144.0.0",
+    "groq-sdk": "^0.9.1",
+    "node-cron": "^3.0.3",
+    "node-telegram-bot-api": "^0.66.0"
+  }
+}
