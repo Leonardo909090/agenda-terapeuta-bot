@@ -26,11 +26,11 @@ const WEEKDAY_LABELS = {
 
 function createBot() {
   const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
-  const therapistChatId = String(process.env.THERAPIST_CHAT_ID);
+  const allowedChatIds = process.env.THERAPIST_CHAT_ID.split(',').map((id) => id.trim());
 
   bot.on('message', async (msg) => {
     const chatId = String(msg.chat.id);
-    if (chatId !== therapistChatId) return;
+    if (!allowedChatIds.includes(chatId)) return;
 
     try {
       if (msg.voice || msg.audio) {
@@ -53,7 +53,7 @@ function createBot() {
 
   bot.on('callback_query', async (query) => {
     const chatId = String(query.message.chat.id);
-    if (chatId !== therapistChatId) return;
+    if (!allowedChatIds.includes(chatId)) return;
 
     try {
       await handleConfirmationCallback(bot, chatId, query);

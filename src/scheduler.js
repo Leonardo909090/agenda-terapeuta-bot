@@ -15,7 +15,7 @@ function formatDailyAgenda(events) {
 }
 
 function startDailyAgendaJob(bot) {
-  const chatId = process.env.THERAPIST_CHAT_ID;
+  const chatIds = process.env.THERAPIST_CHAT_ID.split(',').map((id) => id.trim());
 
   cron.schedule(
     '0 8 * * *',
@@ -23,7 +23,11 @@ function startDailyAgendaJob(bot) {
       try {
         const today = calendar.todayISO();
         const events = await calendar.listEventsForDay(today);
-        await bot.sendMessage(chatId, formatDailyAgenda(events));
+        const message = formatDailyAgenda(events);
+
+        for (const chatId of chatIds) {
+          await bot.sendMessage(chatId, message);
+        }
       } catch (err) {
         console.error('Erro ao enviar agenda diária:', err);
       }

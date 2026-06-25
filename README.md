@@ -21,8 +21,9 @@ Bot de Telegram que entende comandos em português (texto ou áudio) para gerenc
 ### 2. Descobrir o THERAPIST_CHAT_ID
 
 1. No Telegram, procure por **@userinfobot** e inicie uma conversa com ele.
-2. Ele responde com o seu `Id` — esse número é o `THERAPIST_CHAT_ID`.
-3. Guarde esse valor no `.env`. O bot vai ignorar qualquer mensagem que não venha desse chat.
+2. Ele responde com o `Id` da pessoa — esse número é o `THERAPIST_CHAT_ID`.
+3. Guarde esse valor no `.env`. O bot vai ignorar qualquer mensagem que não venha de um desses chats.
+4. Para permitir **mais de uma pessoa** usando o bot (ex: você e a terapeuta), repita o processo do @userinfobot para cada pessoa e coloque os IDs separados por vírgula, sem espaço, ex: `THERAPIST_CHAT_ID=621263879,123456789`.
 
 ### 3. Criar projeto no Google Cloud e ativar a Calendar API
 
