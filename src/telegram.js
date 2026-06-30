@@ -202,7 +202,8 @@ async function proceedWithAction(bot, chatId, parsed, fromAudio) {
   const isReadOnly = parsed.action === 'ver' || parsed.action === 'consultar';
   const isBulkCancel = parsed.action === 'cancelar' && !parsed.patientName;
   const isRecurring = parsed.action === 'criar' && !!parsed.recurrence?.weekday;
-  const requiresConfirmation = !isReadOnly && (fromAudio || isBulkCancel || isRecurring);
+  const isMultiDate = parsed.action === 'criar' && parsed.extraDates?.length > 0;
+  const requiresConfirmation = !isReadOnly && (fromAudio || isBulkCancel || isRecurring || isMultiDate);
 
   if (requiresConfirmation) {
     pendingByChat.set(chatId, { type: 'awaitingConfirmation', parsed });
@@ -228,6 +229,10 @@ function describeAction(parsed) {
         const weekdayLabel = WEEKDAY_LABELS[parsed.recurrence.weekday] || parsed.recurrence.weekday;
         const countLabel = parsed.recurrence.count ? `por ${parsed.recurrence.count} semanas` : 'sem data de término definida';
         return `Entendi que você quer marcar ${parsed.patientName} (${durationLabel}) toda ${weekdayLabel} às ${parsed.time}, a partir de ${formatDatePtBr(parsed.date)}, ${countLabel}.`;
+      }
+      if (parsed.extraDates?.length > 0) {
+        const allDates = [parsed.date, ...parsed.extraDates].map(formatDatePtBr).join(', ');
+        return `Entendi que você quer marcar ${parsed.patientName} (${durationLabel}) às ${parsed.time} nos dias: ${allDates}.`;
       }
       return `Entendi que você quer marcar ${parsed.patientName} (${durationLabel}) no dia ${formatDatePtBr(parsed.date)} às ${parsed.time}.`;
     }
@@ -281,7 +286,12 @@ async function executeAction(bot, chatId, parsed) {
 }
 
 async function handleCriar(bot, chatId, parsed) {
-  const { patientName, date, time, notes, recurrence, duration } = parsed;
+  const { patientName, date, time, notes, recurrence, duration, extraDates } = parsed;
+
+  if (extraDates?.length > 0) {
+    return handleCriarMultiData(bot, chatId, parsed);
+  }
+
   const { available, conflictingEvent } = await calendar.checkAvailability(date, time, duration);
 
   if (!available) {
@@ -314,6 +324,40 @@ async function handleCriar(bot, chatId, parsed) {
     chatId,
     `✅ Consulta marcada!\n👤 Paciente: ${patientName}\n📅 Data: ${formatDatePtBr(date)}\n🕐 Horário: ${time} (${durationLabel})`
   );
+}
+
+async function handleCriarMultiData(bot, chatId, parsed) {
+  const { patientName, time, notes, duration } = parsed;
+  const allDates = [parsed.date, ...parsed.extraDates];
+  const durationLabel = formatDurationLabel(duration);
+
+  const created = [];
+  const conflicts = [];
+
+  for (const date of allDates) {
+    const { available, conflictingEvent } = await calendar.checkAvailability(date, time, duration);
+
+    if (!available) {
+      conflicts.push({ date, conflictSummary: conflictingEvent?.summary || 'outro compromisso' });
+      continue;
+    }
+
+    await calendar.createEvent({ patientName, date, time, notes, duration });
+    created.push(date);
+  }
+
+  const lines = [];
+
+  if (created.length > 0) {
+    lines.push(`✅ Consulta marcada!\n👤 Paciente: ${patientName}\n🕐 Horário: ${time} (${durationLabel})\n📅 Dias: ${created.map(formatDatePtBr).join(', ')}`);
+  }
+
+  if (conflicts.length > 0) {
+    const conflictLines = conflicts.map((c) => `⚠️ ${formatDatePtBr(c.date)} já está ocupado (${c.conflictSummary}) — não marquei esse dia.`);
+    lines.push(conflictLines.join('\n'));
+  }
+
+  await bot.sendMessage(chatId, lines.join('\n\n'));
 }
 
 async function handleCancelar(bot, chatId, parsed) {
