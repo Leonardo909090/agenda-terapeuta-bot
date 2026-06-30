@@ -56,7 +56,7 @@ function createBot() {
     if (!allowedChatIds.includes(chatId)) return;
 
     try {
-      await handleConfirmationCallback(bot, chatId, query);
+      await handleCallbackQuery(bot, chatId, query);
     } catch (err) {
       console.error('Erro ao processar confirmação:', err);
       await bot.answerCallbackQuery(query.id).catch(() => {});
@@ -67,25 +67,41 @@ function createBot() {
   return bot;
 }
 
-async function handleConfirmationCallback(bot, chatId, query) {
+async function handleCallbackQuery(bot, chatId, query) {
   const pending = pendingByChat.get(chatId);
 
-  if (!pending || pending.type !== 'awaitingConfirmation') {
-    await bot.answerCallbackQuery(query.id, { text: 'Essa confirmação já expirou.' });
+  if (!pending) {
+    await bot.answerCallbackQuery(query.id, { text: 'Essa ação já expirou.' });
     return;
   }
 
-  pendingByChat.delete(chatId);
-  await bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: query.message.message_id });
+  if (pending.type === 'awaitingDuration' && (query.data === 'duration_90' || query.data === 'duration_120')) {
+    pendingByChat.delete(chatId);
+    await bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: query.message.message_id });
 
-  if (query.data === 'confirm_yes') {
-    await bot.answerCallbackQuery(query.id, { text: 'Confirmado!' });
-    await executeAction(bot, chatId, pending.parsed);
+    const duration = query.data === 'duration_90' ? 90 : 120;
+    pending.parsed.duration = duration;
+    await bot.answerCallbackQuery(query.id, { text: duration === 90 ? '1h30 selecionado' : '2h selecionado' });
+    await proceedWithAction(bot, chatId, pending.parsed, pending.fromAudio);
     return;
   }
 
-  await bot.answerCallbackQuery(query.id, { text: 'Cancelado.' });
-  await bot.sendMessage(chatId, 'Ok, cancelei a operação. Pode me dizer de novo o que você precisa.');
+  if (pending.type === 'awaitingConfirmation') {
+    pendingByChat.delete(chatId);
+    await bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: query.message.message_id });
+
+    if (query.data === 'confirm_yes') {
+      await bot.answerCallbackQuery(query.id, { text: 'Confirmado!' });
+      await executeAction(bot, chatId, pending.parsed);
+      return;
+    }
+
+    await bot.answerCallbackQuery(query.id, { text: 'Cancelado.' });
+    await bot.sendMessage(chatId, 'Ok, cancelei a operação. Pode me dizer de novo o que você precisa.');
+    return;
+  }
+
+  await bot.answerCallbackQuery(query.id, { text: 'Essa ação já expirou.' });
 }
 
 async function handleIncomingText(bot, chatId, text, { fromAudio }) {
@@ -166,6 +182,23 @@ async function routeParsed(bot, chatId, parsed, { rawMessage, fromAudio }) {
     return;
   }
 
+  if (parsed.action === 'criar' && !parsed.duration) {
+    pendingByChat.set(chatId, { type: 'awaitingDuration', parsed, fromAudio });
+    await bot.sendMessage(chatId, `Esse atendimento de ${parsed.patientName} vai ser de quanto tempo?`, {
+      reply_markup: {
+        inline_keyboard: [[
+          { text: '1h30', callback_data: 'duration_90' },
+          { text: '2h', callback_data: 'duration_120' },
+        ]],
+      },
+    });
+    return;
+  }
+
+  await proceedWithAction(bot, chatId, parsed, fromAudio);
+}
+
+async function proceedWithAction(bot, chatId, parsed, fromAudio) {
   const isReadOnly = parsed.action === 'ver' || parsed.action === 'consultar';
   const isBulkCancel = parsed.action === 'cancelar' && !parsed.patientName;
   const isRecurring = parsed.action === 'criar' && !!parsed.recurrence?.weekday;
@@ -189,13 +222,15 @@ async function routeParsed(bot, chatId, parsed, { rawMessage, fromAudio }) {
 
 function describeAction(parsed) {
   switch (parsed.action) {
-    case 'criar':
+    case 'criar': {
+      const durationLabel = formatDurationLabel(parsed.duration);
       if (parsed.recurrence?.weekday) {
         const weekdayLabel = WEEKDAY_LABELS[parsed.recurrence.weekday] || parsed.recurrence.weekday;
         const countLabel = parsed.recurrence.count ? `por ${parsed.recurrence.count} semanas` : 'sem data de término definida';
-        return `Entendi que você quer marcar ${parsed.patientName} toda ${weekdayLabel} às ${parsed.time}, a partir de ${formatDatePtBr(parsed.date)}, ${countLabel}.`;
+        return `Entendi que você quer marcar ${parsed.patientName} (${durationLabel}) toda ${weekdayLabel} às ${parsed.time}, a partir de ${formatDatePtBr(parsed.date)}, ${countLabel}.`;
       }
-      return `Entendi que você quer marcar ${parsed.patientName} no dia ${formatDatePtBr(parsed.date)} às ${parsed.time}.`;
+      return `Entendi que você quer marcar ${parsed.patientName} (${durationLabel}) no dia ${formatDatePtBr(parsed.date)} às ${parsed.time}.`;
+    }
     case 'cancelar':
       if (parsed.patientName) {
         return `Entendi que você quer cancelar a consulta de ${parsed.patientName}${parsed.date ? ` do dia ${formatDatePtBr(parsed.date)}` : ''}.`;
@@ -212,6 +247,14 @@ function describeAction(parsed) {
     default:
       return 'Entendi seu pedido.';
   }
+}
+
+function formatDurationLabel(minutes) {
+  if (minutes === 90) return '1h30';
+  if (minutes === 120) return '2h';
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return mins === 0 ? `${hours}h` : `${hours}h${mins}`;
 }
 
 function formatDatePtBr(isoDate) {
@@ -238,11 +281,11 @@ async function executeAction(bot, chatId, parsed) {
 }
 
 async function handleCriar(bot, chatId, parsed) {
-  const { patientName, date, time, notes, recurrence } = parsed;
-  const { available, conflictingEvent } = await calendar.checkAvailability(date, time);
+  const { patientName, date, time, notes, recurrence, duration } = parsed;
+  const { available, conflictingEvent } = await calendar.checkAvailability(date, time, duration);
 
   if (!available) {
-    const slots = await calendar.suggestFreeSlots(date, time);
+    const slots = await calendar.suggestFreeSlots(date, time, 3, duration);
     const conflictSummary = conflictingEvent?.summary || 'outro compromisso';
     const slotsText = slots.length
       ? `Próximos horários livres: ${slots.join(', ')}.`
@@ -254,21 +297,22 @@ async function handleCriar(bot, chatId, parsed) {
     return;
   }
 
-  await calendar.createEvent({ patientName, date, time, notes, recurrence });
+  await calendar.createEvent({ patientName, date, time, notes, recurrence, duration });
+  const durationLabel = formatDurationLabel(duration);
 
   if (recurrence?.weekday) {
     const weekdayLabel = WEEKDAY_LABELS[recurrence.weekday] || recurrence.weekday;
     const countLabel = recurrence.count ? `por ${recurrence.count} semanas` : 'sem data de término (repete indefinidamente até você cancelar)';
     await bot.sendMessage(
       chatId,
-      `✅ Consulta recorrente marcada!\n👤 Paciente: ${patientName}\n🔁 Toda ${weekdayLabel} às ${time} (2h)\n📅 A partir de: ${formatDatePtBr(date)}\n${countLabel}\n\n⚠️ Só verifiquei conflito no primeiro horário — vale conferir a agenda das próximas semanas.`
+      `✅ Consulta recorrente marcada!\n👤 Paciente: ${patientName}\n🔁 Toda ${weekdayLabel} às ${time} (${durationLabel})\n📅 A partir de: ${formatDatePtBr(date)}\n${countLabel}\n\n⚠️ Só verifiquei conflito no primeiro horário — vale conferir a agenda das próximas semanas.`
     );
     return;
   }
 
   await bot.sendMessage(
     chatId,
-    `✅ Consulta marcada!\n👤 Paciente: ${patientName}\n📅 Data: ${formatDatePtBr(date)}\n🕐 Horário: ${time} (2h)`
+    `✅ Consulta marcada!\n👤 Paciente: ${patientName}\n📅 Data: ${formatDatePtBr(date)}\n🕐 Horário: ${time} (${durationLabel})`
   );
 }
 
@@ -359,17 +403,18 @@ async function runOnEvent(bot, chatId, action, event, parsed) {
 
   if (action === 'remarcar') {
     const { newDate, newTime } = parsed;
-    const { available, conflictingEvent } = await calendar.checkAvailability(newDate, newTime);
+    const originalDuration = Math.round((new Date(event.end.dateTime) - new Date(event.start.dateTime)) / 60000);
+    const { available, conflictingEvent } = await calendar.checkAvailability(newDate, newTime, originalDuration);
 
     if (!available && conflictingEvent?.id !== event.id) {
-      const slots = await calendar.suggestFreeSlots(newDate, newTime);
+      const slots = await calendar.suggestFreeSlots(newDate, newTime, 3, originalDuration);
       const slotsText = slots.length ? `Próximos horários livres: ${slots.join(', ')}.` : 'Não há outros horários livres nesse dia.';
       await bot.sendMessage(chatId, `⚠️ Já existe um compromisso em ${formatDatePtBr(newDate)} às ${newTime}.\n${slotsText}`);
       return;
     }
 
-    await calendar.rescheduleEvent(event.id, newDate, newTime);
-    await bot.sendMessage(chatId, `🔁 Consulta remarcada para ${formatDatePtBr(newDate)} às ${newTime}.`);
+    await calendar.rescheduleEvent(event.id, newDate, newTime, originalDuration);
+    await bot.sendMessage(chatId, `🔁 Consulta remarcada para ${formatDatePtBr(newDate)} às ${newTime} (${formatDurationLabel(originalDuration)}).`);
   }
 }
 

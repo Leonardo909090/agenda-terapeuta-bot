@@ -22,6 +22,7 @@ Sua tarefa: ler a mensagem da terapeuta e devolver APENAS um JSON (sem markdown,
   "period": "day" | "week" | null,
   "notes": string | null,
   "recurrence": { "weekday": "MO"|"TU"|"WE"|"TH"|"FR"|"SA"|"SU", "count": number | null } | null,
+  "duration": 90 | 120 | null,
   "missingInfo": string[]
 }
 
@@ -31,6 +32,7 @@ Regras:
 - "ver" usa "period": "day" para um dia específico (preencha "date") ou "week" para a semana.
 - "consultar" é usada quando a terapeuta pergunta sobre os horários/dias de UM paciente específico, sem querer criar, cancelar ou remarcar nada — ex: "Quando a Fernanda está marcada?", "A Bia tem consulta essa semana?", "Qual o próximo horário do João?". Preencha "patientName". Se faltar o nome do paciente, liste ["patientName"] em "missingInfo".
 - Se a terapeuta pedir para marcar um paciente em um dia da semana recorrente (ex: "todas as terças", "toda sexta às 14h"), use "action": "criar", preencha "date" com a data da PRÓXIMA ocorrência desse dia da semana a partir de hoje, e preencha "recurrence.weekday" com o código de duas letras correspondente (MO, TU, WE, TH, FR, SA, SU). Se a terapeuta especificar quantas semanas/sessões (ex: "por 8 semanas", "10 sessões"), preencha "recurrence.count" com esse número; se não especificar, deixe "recurrence.count" como null e liste "recurrenceCount" em "missingInfo" perguntando por quantas semanas repetir.
+- Se a terapeuta mencionar a duração do atendimento (ex: "1h30", "uma hora e meia", "2 horas"), preencha "duration" em minutos (90 ou 120). Se não mencionar, deixe "duration" como null — a duração será perguntada depois, não é necessário listar em "missingInfo".
 - Se a ação for "criar" ou "remarcar" e faltar paciente, data ou horário, liste os campos faltantes em "missingInfo" (ex: ["time"]).
 - Se a terapeuta pedir para cancelar/apagar TODA a agenda de um dia (sem mencionar um paciente específico), use "action": "cancelar", deixe "patientName" como null e preencha "date". Se for sobre a semana toda (ex: "essa semana", "semana toda", "todos os atendimentos dessa semana"), preencha "period": "week" em vez de "date". Se a terapeuta mencionar vários dias específicos separados (ex: "dias 24, 25, 29 e 30"), trate como pedido de cancelamento da semana ("period": "week") se esses dias cobrirem a semana atual, ou peça para ela cancelar um dia por vez caso não fique claro. Se nem data nem período puderem ser definidos, liste "date" em "missingInfo".
 - Se não conseguir identificar a intenção, use "action": "desconhecido".
@@ -64,6 +66,7 @@ async function interpretCommand(message) {
       period: null,
       notes: null,
       recurrence: null,
+      duration: null,
       missingInfo: [],
     };
   }
